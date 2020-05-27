@@ -1,0 +1,16 @@
+{
+  "wait_seconds": "30",
+  "daemon": false,
+  "ignore_labels": ["temp", "build"],
+  "containers": {
+    "container-abc": {
+      "ports": ["80:8000"],
+      "image": "ubuntu",
+      "env": { "VAR": "VAL" },
+      "command": "sleep 100000",
+      "volumes": ["/tmp:/tmp"],
+      "log_driver": "",
+      "log_options": {}
+    }
+  }
+}

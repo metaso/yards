@@ -184,10 +184,12 @@ def start_container_return_error(container: Container) -> Optional[str]:
     If it starts returns None, if it fails - returns error.
     """
     optional = []
-    if container.ports:
-        optional.extend(["--publish", *container.ports])
-    if container.volumes:
-        optional.extend(["--volume", *container.volumes])
+    for ports_string in container.ports:
+        optional.extend(["--publish", ports_string])
+
+    for volume_string in container.volumes:
+        optional.extend(["--volume", volume_string])
+
     if container.log_driver:
         optional.extend(["--log-driver", container.log_driver])
         log_opts = list(f"{var}={val}" for var, val in container.log_options.items() if val and var)

@@ -38,6 +38,7 @@ class Config:
     wait_seconds: int
     daemon: bool
     ignore_labels: List[str]
+    ignore_images: List[str]
     containers: Dict[str, Container]
 
 
@@ -99,7 +100,7 @@ def build_ports_list_from_inspect(docker_ports: Dict[str, List[Dict[str, str]]])
     return ports
 
 
-def read_existing_containers(ignore_labels: List[str]) -> Dict[str, Container]:
+def read_existing_containers(ignore_labels: List[str], ignore_images: List[str]) -> Dict[str, Container]:
     """
     Will find what is currently running and with what parameters.
     """
@@ -113,7 +114,15 @@ def read_existing_containers(ignore_labels: List[str]) -> Dict[str, Container]:
         config = inspect.get("Config", {}) or {}
         labels = config.get("Labels", {}) or {}
         labels_set = set(label.lower() for label in labels.keys())
+        # Will ignore with labels
         if labels_set.intersection(ignore_labels):
+            continue
+        image = config.get("Image", "")
+        # Will ignore itself
+        if "metaso/yards" in image:
+            continue
+        # Will ignore images
+        if list(i for i in ignore_images if i in image):
             continue
         host_config = inspect.get("HostConfig", {}) or {}
         network_settings = inspect.get("NetworkSettings", {}) or {}
@@ -126,7 +135,7 @@ def read_existing_containers(ignore_labels: List[str]) -> Dict[str, Container]:
             containers[name] = Container(
                 id=inspect.get("Id", ""),
                 name=name,
-                image=config.get("Image", ""),
+                image=image,
                 ports=build_ports_list_from_inspect(docker_ports=docker_ports),
                 env=build_env_dict_from_inspect(docker_env=docker_env),
                 command=" ".join(config.get("Cmd", []) or []),
@@ -169,6 +178,7 @@ def parse_config(raw_config: Dict) -> Config:
         wait_seconds=raw_config.get("wait_seconds", 0),
         daemon=raw_config.get("daemon", False),
         ignore_labels=list(l.lower() for l in raw_config.get("ignore_labels", [])),
+        ignore_images=list(l.lower() for l in raw_config.get("ignore_images", [])),
         containers=containers,
     )
 
@@ -263,17 +273,19 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
                         changes.append(f"{field.name}: {required_field} != {existing_field}")
 
             if changes:
-                print(f"Stopping {existing_container.name} because of changes: {' '.join(changes)}")
+                print(
+                    f"Stopping {existing_container.name}/{existing_container.image} because of changes: {' '.join(changes)}"
+                )
                 remove_container(existing_container.name)
                 stopped_because_of_different_settings[existing_container.name] = existing_container
             else:
                 del should_start[required_container.name]
         else:
-            print(f"Stopping {existing_container.name} because it is not required")
-            # remove_container(existing_container.name)
+            print(f"Stopping {existing_container.name}/{existing_container.image} because it is not required")
+            remove_container(existing_container.name)
 
     for required_container in should_start.values():
-        print(f"Starting {required_container.name}")
+        print(f"Starting {required_container.name}/{required_container.image}")
         start_error = start_container_return_error(required_container)
         if start_error:
             print(f"Failed starting {required_container}")
@@ -296,6 +308,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     config = parse_config(json.load(open(sys.argv[1])))
-    existing_containers = read_existing_containers(ignore_labels=config.ignore_labels)
+    existing_containers = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
     status = update_containers(required=config.containers, existing=existing_containers)
     print(status)

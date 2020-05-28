@@ -109,6 +109,9 @@ def inspect_container(name_or_id: str, ignore_labels: List[str], ignore_images: 
 
     inspect = json.loads(check_output(["docker", "inspect", name_or_id]))
 
+    if inspect:
+        inspect = inspect[0]
+
     config = inspect.get("Config", {}) or {}
     labels = config.get("Labels", {}) or {}
     labels_set = set(label.lower() for label in labels.keys())

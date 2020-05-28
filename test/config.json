@@ -2,7 +2,7 @@
   "wait_seconds": "30",
   "daemon": false,
   "ignore_labels": ["temp", "build"],
-  "ignore_images": [],
+  "ignore_images": ["yards"],
   "containers": {
     "container-abc": {
       "ports": ["80:8000"],

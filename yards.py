@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
 import dataclasses
-from subprocess import CalledProcessError, check_output, PIPE, run, STDOUT
 import json
 import shlex
 import sys
+from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from tempfile import NamedTemporaryFile
+from time import time
 from typing import Dict, List, Optional
-from pprint import pprint
+
 
 """
 yards tries to keep containers described in the config alive and running with the correct settings.
@@ -31,6 +32,7 @@ class Container:
     log_driver: str
     log_options: Dict[str, str]
     running: bool
+    restarts: int = 0
 
 
 @dataclasses.dataclass
@@ -40,6 +42,12 @@ class Config:
     ignore_labels: List[str]
     ignore_images: List[str]
     containers: Dict[str, Container]
+
+
+@dataclasses.dataclass
+class Status:
+    containers: Dict[str, Container]
+    last_update_time: int
 
 
 def build_env_dict_from_inspect(docker_env: List[str]) -> Dict[str, str]:
@@ -113,25 +121,28 @@ def inspect_container(name_or_id: str, ignore_labels: List[str], ignore_images: 
         inspect = inspect[0]
 
     config = inspect.get("Config", {}) or {}
+    name = inspect.get("Name", "")
+    container_id = inspect.get("Id", "")
+
     labels = config.get("Labels", {}) or {}
     labels_set = set(label.lower() for label in labels.keys())
     # Will ignore with labels
     if labels_set.intersection(ignore_labels):
+        print(f"Ignoring {name}/{container_id} because of labels {labels_set}")
         return None
     image = config.get("Image", "")
     # Will ignore itself
     if "metaso/yards" in image:
+        print(f"Ignoring {name}/{container_id} because it is me")
         return None
     # Will ignore images
     if list(i for i in ignore_images if i in image):
+        print(f"Ignoring {name}/{container_id} because of the image {image}")
         return None
     host_config = inspect.get("HostConfig", {}) or {}
     network_settings = inspect.get("NetworkSettings", {}) or {}
     docker_ports = network_settings.get("Ports", {}) or {}
     docker_env = config.get("Env", []) or []
-
-    name = inspect.get("Name", "")
-    container_id = inspect.get("Id", "")
 
     if name and container_id:
         return Container(
@@ -248,7 +259,7 @@ def start_container_return_error(container: Container) -> Optional[str]:
         return None
 
 
-def update_containers(required: Dict[str, Container], existing: Dict[str, Container]) -> Dict[str, Dict[str, str]]:
+def update_containers(required: Dict[str, Container], existing: Dict[str, Container]):
     """
     Main thing.
     It will stop containers that are
@@ -315,8 +326,6 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
                     print(start_error)
                     print("Damn.")
 
-    return {"aaa": {"oooh": "eeee"}}
-
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
@@ -339,7 +348,13 @@ Running inside docker under cron:
         )
         sys.exit(1)
 
-    config = parse_config(json.load(open(sys.argv[1])))
+    config_file_name, status_file_name = sys.argv[1], sys.argv[2]
+
+    config = parse_config(json.load(open(config_file_name)))
     existing_containers = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
-    status = update_containers(required=config.containers, existing=existing_containers)
-    print(status)
+    update_containers(required=config.containers, existing=existing_containers)
+    now_running = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
+
+    status = Status(last_update_time=int(time()), containers=now_running)
+
+    json.dump(dataclasses.asdict(status), open(status_file_name, mode="x"))

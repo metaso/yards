@@ -357,4 +357,4 @@ Running inside docker under cron:
 
     status = Status(last_update_time=int(time()), containers=now_running)
 
-    json.dump(dataclasses.asdict(status), open(status_file_name, mode="x"))
+    json.dump(dataclasses.asdict(status), open(status_file_name, mode="w"), indent=2, sort_keys=True)

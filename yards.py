@@ -6,7 +6,7 @@ import shlex
 import sys
 from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from tempfile import NamedTemporaryFile
-from time import time
+from time import sleep, time
 from typing import Dict, List, Optional
 
 
@@ -351,10 +351,19 @@ Running inside docker under cron:
     config_file_name, status_file_name = sys.argv[1], sys.argv[2]
 
     config = parse_config(json.load(open(config_file_name)))
-    existing_containers = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
-    update_containers(required=config.containers, existing=existing_containers)
-    now_running = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
 
-    status = Status(last_update_time=int(time()), containers=now_running)
+    while True:  # Ooh, scary.
+        existing_containers = read_existing_containers(
+            ignore_labels=config.ignore_labels, ignore_images=config.ignore_images
+        )
+        update_containers(required=config.containers, existing=existing_containers)
+        now_running = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
 
-    json.dump(dataclasses.asdict(status), open(status_file_name, mode="w"), indent=2, sort_keys=True)
+        status = Status(last_update_time=int(time()), containers=now_running)
+
+        json.dump(dataclasses.asdict(status), open(status_file_name, mode="w"), indent=2, sort_keys=True)
+
+        if config.daemon:
+            sleep(config.wait_seconds or 30)
+        else:
+            break

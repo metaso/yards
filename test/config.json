@@ -1,7 +1,7 @@
 {
   "wait_seconds": "30",
   "daemon": false,
-  "ignore_labels": ["temp", "build"],
+  "ignore_labels": ["temp", "build", "yards-ignore"],
   "ignore_images": ["yards"],
   "containers": {
     "container-abc": {

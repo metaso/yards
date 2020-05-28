@@ -100,6 +100,52 @@ def build_ports_list_from_inspect(docker_ports: Dict[str, List[Dict[str, str]]])
     return ports
 
 
+def inspect_container(name_or_id: str, ignore_labels: List[str], ignore_images: List[str]) -> Optional[Container]:
+    """
+    Will run docker inspect for container by name and return results of inspection.
+    If can't find container will return None.
+    Also will return None for containers which should be ignored (like yards itself and ignored labels & images).
+    """
+
+    inspect = json.loads(check_output(["docker", "inspect", name_or_id]))
+
+    config = inspect.get("Config", {}) or {}
+    labels = config.get("Labels", {}) or {}
+    labels_set = set(label.lower() for label in labels.keys())
+    # Will ignore with labels
+    if labels_set.intersection(ignore_labels):
+        return None
+    image = config.get("Image", "")
+    # Will ignore itself
+    if "metaso/yards" in image:
+        return None
+    # Will ignore images
+    if list(i for i in ignore_images if i in image):
+        return None
+    host_config = inspect.get("HostConfig", {}) or {}
+    network_settings = inspect.get("NetworkSettings", {}) or {}
+    docker_ports = network_settings.get("Ports", {}) or {}
+    docker_env = config.get("Env", []) or []
+
+    name = inspect.get("Name", "")
+    container_id = inspect.get("Id", "")
+
+    if name and container_id:
+        return Container(
+            id=container_id,
+            name=name,
+            image=image,
+            ports=build_ports_list_from_inspect(docker_ports=docker_ports),
+            env=build_env_dict_from_inspect(docker_env=docker_env),
+            command=" ".join(config.get("Cmd", []) or []),
+            volumes=host_config.get("Binds", []) or [],  # type: ignore
+            log_driver=host_config.get("LogConfig", {}).get("Type", "") or "",
+            log_options=host_config.get("LogConfig", {}).get("Config", {}) or {},
+            running=inspect.get("State", {}).get("Running", False) or False,
+        )
+    return None
+
+
 def read_existing_containers(ignore_labels: List[str], ignore_images: List[str]) -> Dict[str, Container]:
     """
     Will find what is currently running and with what parameters.
@@ -107,44 +153,11 @@ def read_existing_containers(ignore_labels: List[str], ignore_images: List[str])
     containers = {}
 
     # Will get just list of IDs and then inspect each
-    all_ids = check_output(["docker", "ps", "--all", "--format", "{{.ID}}", "--no-trunc"]).split()
-    all_inspect = json.loads(check_output(["docker", "inspect", *all_ids]))
-
-    for inspect in all_inspect:
-        config = inspect.get("Config", {}) or {}
-        labels = config.get("Labels", {}) or {}
-        labels_set = set(label.lower() for label in labels.keys())
-        # Will ignore with labels
-        if labels_set.intersection(ignore_labels):
-            continue
-        image = config.get("Image", "")
-        # Will ignore itself
-        if "metaso/yards" in image:
-            continue
-        # Will ignore images
-        if list(i for i in ignore_images if i in image):
-            continue
-        host_config = inspect.get("HostConfig", {}) or {}
-        network_settings = inspect.get("NetworkSettings", {}) or {}
-        docker_ports = network_settings.get("Ports", {}) or {}
-        docker_env = config.get("Env", []) or []
-
-        name = inspect.get("Name", "")
-
-        if name:
-            containers[name] = Container(
-                id=inspect.get("Id", ""),
-                name=name,
-                image=image,
-                ports=build_ports_list_from_inspect(docker_ports=docker_ports),
-                env=build_env_dict_from_inspect(docker_env=docker_env),
-                command=" ".join(config.get("Cmd", []) or []),
-                volumes=host_config.get("Binds", []) or [],  # type: ignore
-                log_driver=host_config.get("LogConfig", {}).get("Type", "") or "",
-                log_options=host_config.get("LogConfig", {}).get("Config", {}) or {},
-                running=inspect.get("State", {}).get("Running", False) or False,
-            )
-
+    all_ids = check_output(["docker", "ps", "--all", "--format", "{{.ID}}", "--no-trunc"], text=True).split()
+    for running_id in all_ids:
+        container = inspect_container(running_id, ignore_labels=ignore_labels, ignore_images=ignore_images)
+        if container:
+            containers[container.name] = container
     return containers
 
 

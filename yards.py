@@ -304,7 +304,23 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <config.json> <status.json>")
+        print(
+            f"""
+General usage:
+{sys.argv[0]} <config.json> <status.json>
+
+Will read config, update containers and write status out.
+
+Running inside docker as a daemon:
+* Put config in /etc/yards/config.json
+* Set daemon=true in config
+* docker run --detach --name yards --restart always --volume /var/run/docker.sock:/var/run/docker.sock --volume /etc/yards:/etc/yards metaso/yards /etc/yards/config.json /etc/yards/status.json
+
+Running inside docker under cron:
+* Set daemon=false in config
+* docker run -ti --rm --volume /var/run/docker.sock:/var/run/docker.sock --volume /etc/yards:/etc/yards metaso/yards /etc/yards/config.json /etc/yards/status.json
+"""
+        )
         sys.exit(1)
 
     config = parse_config(json.load(open(sys.argv[1])))

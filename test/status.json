@@ -1,0 +1,25 @@
+{
+  "containers": {
+    "/container-abc": {
+      "command": "sleep 100000",
+      "env": {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "VAR": "VAL"
+      },
+      "id": "22f96c9df1054174a6a1aa207267675f888b5ca0d2725f8c11692006191073f6",
+      "image": "ubuntu",
+      "log_driver": "json-file",
+      "log_options": {},
+      "name": "/container-abc",
+      "ports": [
+        "80:8000/tcp"
+      ],
+      "restarts": 0,
+      "running": true,
+      "volumes": [
+        "/tmp:/tmp"
+      ]
+    }
+  },
+  "last_update_time": 1590651670
+}

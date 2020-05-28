@@ -350,9 +350,9 @@ Running inside docker under cron:
 
     config_file_name, status_file_name = sys.argv[1], sys.argv[2]
 
-    config = parse_config(json.load(open(config_file_name)))
-
     while True:  # Ooh, scary.
+        config = parse_config(json.load(open(config_file_name)))
+
         existing_containers = read_existing_containers(
             ignore_labels=config.ignore_labels, ignore_images=config.ignore_images
         )

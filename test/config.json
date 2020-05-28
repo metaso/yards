@@ -1,4 +1,5 @@
 {
+  "wait_seconds": 30,
   "daemon": true,
   "ignore_labels": ["temp", "build", "yards-ignore"],
   "ignore_images": ["yards"],

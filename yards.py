@@ -2,12 +2,14 @@
 
 import dataclasses
 import json
+import signal
 import shlex
 import sys
 from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from tempfile import NamedTemporaryFile
 from time import sleep, time
 from typing import Dict, List, Optional
+from pathlib import Path
 
 
 """
@@ -44,6 +46,7 @@ class Config:
     containers: Dict[str, Container]
 
 
+# TODO: Status should show summary and possible start error
 @dataclasses.dataclass
 class Status:
     containers: Dict[str, Container]
@@ -350,20 +353,60 @@ Running inside docker under cron:
 
     config_file_name, status_file_name = sys.argv[1], sys.argv[2]
 
+    received_termination = False
+
+    def sigterm(signum, frame):
+        print(f"Got signal {signum}, finishing and quiting.")
+        global received_termination
+        received_termination = True
+
+    signal.signal(signal.SIGTERM, sigterm)
+    signal.signal(signal.SIGINT, sigterm)
+
+    # We do not want to check containers too often, so we will wait wait_seconds before updates
+    # and wait_seconds since the last modification of config file.
+    next_update_time = int(time())
+    # But we will also record last update time, and if it was too long, will update
+    last_update_time = 0
+    # How many seconds is too long
+    TOO_LONG_SINCE_LAST_UPDATE_SECONDS = 180
+
+    config_file = Path(config_file_name)
+    config = parse_config(json.load(config_file.open()))
+
     while True:  # Ooh, scary.
-        config = parse_config(json.load(open(config_file_name)))
+        # We check every tick when config file was updated
+        since_mtime = time() - config_file.stat().st_mtime
+        # If config becomes fresh, we reset next update time to not wait more than wait_seconds since modification
+        if since_mtime < config.wait_seconds:
+            wait_seconds = min(config.wait_seconds - since_mtime, config.wait_seconds)
+            print(f"Config was modified {since_mtime} seconds ago need to wait {wait_seconds} more before applying")
+            next_update_time = int(time() + wait_seconds)
 
-        existing_containers = read_existing_containers(
-            ignore_labels=config.ignore_labels, ignore_images=config.ignore_images
-        )
-        update_containers(required=config.containers, existing=existing_containers)
-        now_running = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
+        # But we also need to be mindful if there are constant updates to not wait too long
+        since_last_update_seconds = int(time() - last_update_time)
+        if since_last_update_seconds > TOO_LONG_SINCE_LAST_UPDATE_SECONDS:
+            if last_update_time:
+                print(f"Last update was {since_last_update_seconds} seconds ago updating now")
+            next_update_time = int(time())
 
-        status = Status(last_update_time=int(time()), containers=now_running)
+        # Is it time to update?
+        if next_update_time < time():
+            config = parse_config(json.load(config_file.open()))
+            print("Updating containers")
+            next_update_time = int(time()) + config.wait_seconds
+            existing_containers = read_existing_containers(
+                ignore_labels=config.ignore_labels, ignore_images=config.ignore_images
+            )
+            update_containers(required=config.containers, existing=existing_containers)
+            now_running = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
 
-        json.dump(dataclasses.asdict(status), open(status_file_name, mode="w"), indent=2, sort_keys=True)
+            status = Status(last_update_time=int(time()), containers=now_running)
+            last_update_time = status.last_update_time
 
-        if config.daemon:
-            sleep(config.wait_seconds or 30)
-        else:
+            json.dump(dataclasses.asdict(status), open(status_file_name, mode="w"), indent=2, sort_keys=True)
+
+        if received_termination or not config.daemon:
             break
+        else:
+            sleep(2)

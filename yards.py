@@ -46,10 +46,17 @@ class Config:
     containers: Dict[str, Container]
 
 
-# TODO: Status should show summary and possible start error
+@dataclasses.dataclass
+class ContainerStatus:
+    latest_running: bool
+    latest_start_error: str = ""
+    previous_restored: bool = False
+    previous_restore_error: str = ""
+
+
 @dataclasses.dataclass
 class Status:
-    containers: Dict[str, Container]
+    container_statuses: Dict[str, ContainerStatus]
     last_update_time: int
 
 
@@ -262,7 +269,7 @@ def start_container_return_error(container: Container) -> Optional[str]:
         return None
 
 
-def update_containers(required: Dict[str, Container], existing: Dict[str, Container]):
+def update_containers_return_status(required: Dict[str, Container], existing: Dict[str, Container]) -> Status:
     """
     Main thing.
     It will stop containers that are
@@ -271,6 +278,8 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
     
     Then it will start containers that need to run.
     If it can't start container with new settings, it will try to start it with old (if it was stopped).
+
+    Will return Status explaining what happened.
     """
 
     # Will store ones we killed to start with new settings
@@ -279,6 +288,8 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
     # Those should be started because they settings are different
     # We will kick them of the lift if we found matching
     should_start = required.copy()
+
+    container_statuses: Dict[str, ContainerStatus] = {}
 
     for existing_container in existing.values():
         # Lets find matching container in required
@@ -309,6 +320,7 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
                 remove_container(existing_container.name)
                 stopped_because_of_different_settings[existing_container.name] = existing_container
             else:
+                container_statuses[required_container.name] = ContainerStatus(latest_running=True)
                 del should_start[required_container.name]
         else:
             print(f"Stopping {existing_container.name}/{existing_container.image} because it is not required")
@@ -323,11 +335,28 @@ def update_containers(required: Dict[str, Container], existing: Dict[str, Contai
             stopped = stopped_because_of_different_settings.get(required_container.name)
             if stopped:
                 print(f"Re-starting previously stopped {stopped}")
-                start_error = start_container_return_error(stopped)
-                if start_error:
+                restore_error = start_container_return_error(stopped)
+                if restore_error:
                     print(f"Failed re-starting stopped {stopped}")
-                    print(start_error)
+                    print(restore_error)
                     print("Damn.")
+                    container_status = ContainerStatus(
+                        latest_running=False,
+                        latest_start_error=start_error,
+                        previous_restored=False,
+                        previous_restore_error=restore_error,
+                    )
+                else:
+                    container_status = ContainerStatus(
+                        latest_running=False, latest_start_error=start_error, previous_restored=True
+                    )
+            else:
+                container_status = ContainerStatus(latest_running=False, latest_start_error=start_error)
+        else:
+            container_status = ContainerStatus(latest_running=True)
+        container_statuses[required_container.name] = container_status
+
+    return Status(last_update_time=int(time()), container_statuses=container_statuses)
 
 
 if __name__ == "__main__":
@@ -394,14 +423,12 @@ Running inside docker under cron:
         if next_update_time < time():
             config = parse_config(json.load(config_file.open()))
             print("Updating containers")
-            next_update_time = int(time()) + config.wait_seconds
+            next_update_time = int(time()) + TOO_LONG_SINCE_LAST_UPDATE_SECONDS
             existing_containers = read_existing_containers(
                 ignore_labels=config.ignore_labels, ignore_images=config.ignore_images
             )
-            update_containers(required=config.containers, existing=existing_containers)
-            now_running = read_existing_containers(ignore_labels=config.ignore_labels, ignore_images=config.ignore_images)
+            status = update_containers_return_status(required=config.containers, existing=existing_containers)
 
-            status = Status(last_update_time=int(time()), containers=now_running)
             last_update_time = status.last_update_time
 
             json.dump(dataclasses.asdict(status), open(status_file_name, mode="w"), indent=2, sort_keys=True)

@@ -333,7 +333,7 @@ def update_containers_return_status(required: Dict[str, Container], existing: Di
             print(f"Failed starting {required_container}")
             print(start_error)
             stopped = stopped_because_of_different_settings.get(required_container.name)
-            if stopped:
+            if stopped and stopped.running:
                 print(f"Re-starting previously stopped {stopped}")
                 restore_error = start_container_return_error(stopped)
                 if restore_error:
@@ -350,8 +350,18 @@ def update_containers_return_status(required: Dict[str, Container], existing: Di
                     container_status = ContainerStatus(
                         latest_running=False, latest_start_error=start_error, previous_restored=True
                     )
+            elif stopped and not stopped.running:
+                container_status = ContainerStatus(
+                    latest_running=False,
+                    latest_start_error=start_error,
+                    previous_restore_error="Old container was already dead.",
+                )
             else:
-                container_status = ContainerStatus(latest_running=False, latest_start_error=start_error)
+                container_status = ContainerStatus(
+                    latest_running=False,
+                    latest_start_error=start_error,
+                    previous_restore_error="No previous container found.",
+                )
         else:
             container_status = ContainerStatus(latest_running=True)
         container_statuses[required_container.name] = container_status

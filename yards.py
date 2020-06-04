@@ -5,6 +5,7 @@ import json
 import signal
 import shlex
 import sys
+import logging
 from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from tempfile import NamedTemporaryFile
 from time import sleep, time
@@ -138,16 +139,16 @@ def inspect_container(name_or_id: str, ignore_labels: List[str], ignore_images: 
     labels_set = set(label.lower() for label in labels.keys())
     # Will ignore with labels
     if labels_set.intersection(ignore_labels):
-        print(f"Ignoring {name}/{container_id} because of labels {labels_set}")
+        logging.info(f"Ignoring {name}/{container_id} because of labels {labels_set}")
         return None
     image = config.get("Image", "")
     # Will ignore itself
     if "metaso/yards" in image:
-        print(f"Ignoring {name}/{container_id} because it is me")
+        logging.info(f"Ignoring {name}/{container_id} because it is me")
         return None
     # Will ignore images
     if list(i for i in ignore_images if i in image):
-        print(f"Ignoring {name}/{container_id} because of the image {image}")
+        logging.info(f"Ignoring {name}/{container_id} because of the image {image}")
         return None
     host_config = inspect.get("HostConfig", {}) or {}
     network_settings = inspect.get("NetworkSettings", {}) or {}
@@ -261,7 +262,7 @@ def start_container_return_error(container: Container) -> Optional[str]:
             container.image,
             *shlex.split(container.command),
         ]
-        print(" ".join(args))
+        logging.info(" ".join(args))
         completed_process = run(args, stderr=PIPE, text=True)
 
         if completed_process.returncode:
@@ -314,7 +315,7 @@ def update_containers_return_status(required: Dict[str, Container], existing: Di
                         changes.append(f"{field.name}: {required_field} != {existing_field}")
 
             if changes:
-                print(
+                logging.info(
                     f"Stopping {existing_container.name}/{existing_container.image} because of changes: {' '.join(changes)}"
                 )
                 remove_container(existing_container.name)
@@ -323,23 +324,23 @@ def update_containers_return_status(required: Dict[str, Container], existing: Di
                 container_statuses[required_container.name] = ContainerStatus(latest_running=True)
                 del should_start[required_container.name]
         else:
-            print(f"Stopping {existing_container.name}/{existing_container.image} because it is not required")
+            logging.info(f"Stopping {existing_container.name}/{existing_container.image} because it is not required")
             remove_container(existing_container.name)
 
     for required_container in should_start.values():
-        print(f"Starting {required_container.name}/{required_container.image}")
+        logging.info(f"Starting {required_container.name}/{required_container.image}")
         start_error = start_container_return_error(required_container)
         if start_error:
-            print(f"Failed starting {required_container}")
-            print(start_error)
+            logging.error(f"Failed starting {required_container}")
+            logging.error(start_error)
             stopped = stopped_because_of_different_settings.get(required_container.name)
             if stopped and stopped.running:
-                print(f"Re-starting previously stopped {stopped}")
+                logging.warning(f"Re-starting previously stopped {stopped}")
                 restore_error = start_container_return_error(stopped)
                 if restore_error:
-                    print(f"Failed re-starting stopped {stopped}")
-                    print(restore_error)
-                    print("Damn.")
+                    logging.error(f"Failed re-starting stopped {stopped}")
+                    logging.error(restore_error)
+                    logging.error("Damn.")
                     container_status = ContainerStatus(
                         latest_running=False,
                         latest_start_error=start_error,
@@ -390,12 +391,14 @@ Running inside docker under cron:
         )
         sys.exit(1)
 
+    logging.basicConfig(format="[%(asctime)s] %(levelname)s %(message)s", level=logging.INFO)
+
     config_file_name, status_file_name = sys.argv[1], sys.argv[2]
 
     received_termination = False
 
     def sigterm(signum, frame):
-        print(f"Got signal {signum}, finishing and quiting.")
+        logging.warning(f"Got signal {signum}, finishing and quiting.")
         global received_termination
         received_termination = True
 
@@ -421,20 +424,20 @@ Running inside docker under cron:
             wait_seconds = min(config.wait_seconds - since_mtime, config.wait_seconds)
             if next_update_time != int(time() + wait_seconds):
                 # Do it this way, so we do not show this message on every tick
-                print(f"Config was modified {since_mtime} seconds ago need to wait {wait_seconds} more before applying")
+                logging.info(f"Config was modified {since_mtime} sec ago, will wait {wait_seconds} sec before apply")
                 next_update_time = int(time() + wait_seconds)
 
         # But we also need to be mindful if there are constant updates to not wait too long
         since_last_update_seconds = int(time() - last_update_time)
         if since_last_update_seconds > TOO_LONG_SINCE_LAST_UPDATE_SECONDS:
             if last_update_time:
-                print(f"Last update was {since_last_update_seconds} seconds ago updating now")
+                logging.info(f"Last update was {since_last_update_seconds} sec ago updating now")
             next_update_time = int(time())
 
         # Is it time to update?
         if next_update_time < time():
             config = parse_config(json.load(config_file.open()))
-            print("Updating containers")
+            logging.info("Updating containers")
             next_update_time = int(time()) + TOO_LONG_SINCE_LAST_UPDATE_SECONDS
             existing_containers = read_existing_containers(
                 ignore_labels=config.ignore_labels, ignore_images=config.ignore_images

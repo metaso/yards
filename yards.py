@@ -405,12 +405,14 @@ Running inside docker under cron:
 
     while True:  # Ooh, scary.
         # We check every tick when config file was updated
-        since_mtime = time() - config_file.stat().st_mtime
+        since_mtime = int(time() - config_file.stat().st_mtime)
         # If config becomes fresh, we reset next update time to not wait more than wait_seconds since modification
         if since_mtime < config.wait_seconds:
             wait_seconds = min(config.wait_seconds - since_mtime, config.wait_seconds)
-            print(f"Config was modified {since_mtime} seconds ago need to wait {wait_seconds} more before applying")
-            next_update_time = int(time() + wait_seconds)
+            if next_update_time != int(time() + wait_seconds):
+                # Do it this way, so we do not show this message on every tick
+                print(f"Config was modified {since_mtime} seconds ago need to wait {wait_seconds} more before applying")
+                next_update_time = int(time() + wait_seconds)
 
         # But we also need to be mindful if there are constant updates to not wait too long
         since_last_update_seconds = int(time() - last_update_time)
